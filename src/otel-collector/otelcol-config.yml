@@ -118,6 +118,13 @@ processors:
           # could be removed when https://github.com/vercel/next.js/pull/64852 is fixed upstream
           - replace_pattern(name, "\\?.*", "")
           - replace_match(name, "GET /api/products/*", "GET /api/products/{productId}")
+    log_statements:
+      - context: log
+        statements:
+          - set(resource.attributes["service.name"], "checkout") where log.attributes["serviceName"] == "checkout"
+          - set(resource.attributes["service.name"], "email") where log.attributes["serviceName"] == "email"
+          - set(log.time, log.observed_time) where resource.attributes["service.name"] == "shipping"
+          - set(log.time, log.observed_time) where resource.attributes["service.name"] == "currency"
 
 connectors:
   spanmetrics:
@@ -142,7 +149,7 @@ service:
       exporters: [otlphttp/prometheus, debug]
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, transform, batch]
       exporters: [otlp/logs, debug]
   telemetry:
     metrics:
