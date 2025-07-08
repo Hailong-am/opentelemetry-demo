@@ -266,7 +266,6 @@ func (cs *checkout) PlaceOrder(ctx context.Context, req *pb.PlaceOrderRequest) (
 		attribute.String("app.user.id", req.UserId),
 		attribute.String("app.user.currency", req.UserCurrency),
 	)
-	log.Infof("test, spanId:%q, traceId: %q", span.SpanContext().SpanID().String(), span.SpanContext().TraceID().String())
 	log.WithFields(WithTraceFields(ctx)).Infof("[PlaceOrder] user_id=%q user_currency=%q", req.UserId, req.UserCurrency)
 
 	var err error
