@@ -32,6 +32,12 @@ module.exports.charge = async request => {
     // n% chance to fail with app.loyalty.level=gold
     if (Math.random() < numberVariant) {
       span.setAttributes({'app.loyalty.level': 'gold' });
+      logger.error({ 
+        loyalty_level: 'gold', 
+        failure_type: 'simulated_failure',
+        failure_probability: numberVariant,
+        message: 'Payment request failed. Invalid token.'
+      }, 'Payment request failed. Invalid token. app.loyalty.level=gold');
       span.end();
 
       throw new Error('Payment request failed. Invalid token. app.loyalty.level=gold');
@@ -60,14 +66,34 @@ module.exports.charge = async request => {
   });
 
   if (!valid) {
+    logger.error({ 
+      cardType, 
+      lastFourDigits, 
+      valid, 
+      failure_type: 'invalid_card' 
+    }, 'Credit card info is invalid.');
     throw new Error('Credit card info is invalid.');
   }
 
   if (!['visa', 'mastercard'].includes(cardType)) {
+    logger.error({ 
+      cardType, 
+      lastFourDigits, 
+      accepted_types: ['visa', 'mastercard'],
+      failure_type: 'unsupported_card_type'
+    }, `Sorry, we cannot process ${cardType} credit cards. Only VISA or MasterCard is accepted.`);
     throw new Error(`Sorry, we cannot process ${cardType} credit cards. Only VISA or MasterCard is accepted.`);
   }
 
   if ((currentYear * 12 + currentMonth) > (year * 12 + month)) {
+    logger.error({ 
+      lastFourDigits, 
+      expiration_month: month, 
+      expiration_year: year,
+      current_month: currentMonth,
+      current_year: currentYear,
+      failure_type: 'expired_card'
+    }, `The credit card (ending ${lastFourDigits}) expired on ${month}/${year}.`);
     throw new Error(`The credit card (ending ${lastFourDigits}) expired on ${month}/${year}.`);
   }
 

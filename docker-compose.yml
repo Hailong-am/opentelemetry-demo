@@ -50,15 +50,7 @@ services:
         condition: service_started
       kafka:
         condition: service_healthy
-      fluentbit:
-        condition: service_started
-    links:
-      - fluentbit
-    logging:
-      driver: "fluentd"
-      options:
-        fluentd-address: 127.0.0.1:24224
-        tag: accounting
+    logging: *logging
 
   # Fluent-bit logs shipper service
   fluentbit:
@@ -193,16 +185,7 @@ services:
         condition: service_healthy
       flagd:
         condition: service_started
-      fluentbit:
-        condition: service_started
-    links:
-      - fluentbit
-    logging:
-      driver: "fluentd"
-      options:
-        fluentd-address: 127.0.0.1:24224
-        tag: checkout
-    # logging: *logging
+    logging: *logging
 
   # Currency service
   currency:
@@ -230,15 +213,7 @@ services:
     depends_on:
       otel-collector:
         condition: service_started
-      fluentbit:
-        condition: service_started
-    links:
-      - fluentbit
-    logging:
-      driver: "fluentd"
-      options:
-        fluentd-address: 127.0.0.1:24224
-        tag: currency
+    logging: *logging
 
   # Email service
   email:
@@ -512,7 +487,15 @@ services:
         condition: service_started
       flagd:
         condition: service_started
-    logging: *logging
+      fluentbit:
+        condition: service_started
+    links:
+      - fluentbit
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: payment
 
   # Product Catalog service
   product-catalog:
@@ -611,7 +594,15 @@ services:
         condition: service_started
       flagd:
         condition: service_started
-    logging: *logging
+      fluentbit:
+        condition: service_started
+    links:
+      - fluentbit
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: recommendation
 
   # Shipping service
   shipping:

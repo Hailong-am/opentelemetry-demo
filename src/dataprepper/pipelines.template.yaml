@@ -9,10 +9,13 @@ otel-logs-pipeline:
       ssl: false
   processor:
     - add_entries:
-        entries:
-          - key: "log.attributes.serviceName"
-            value_expression: "/serviceName"
-            add_when: "/serviceName != null" 
+      entries:
+        - key: "serviceName"
+          value_expression: "/log/attributes/service.name"
+          add_when: "/log/attributes/service.name != null"
+        - key: "log.attributes.serviceName"
+          value_expression: "/serviceName"
+          add_when: "/serviceName != null"
   buffer:
     bounded_blocking:
   sink:
@@ -22,13 +25,13 @@ otel-logs-pipeline:
         password: OPENSEARCH_PASSWORD
         insecure: true
         index_type: custom
-        index: ss4o_logs-otel-%{yyyy.MM.dd}
+        index: ss4o_logs-%{yyyy.MM.dd}
         bulk_size: 4
         template_type: index-template
         template_content: >
           {
             "index_patterns": [
-              "ss4o_logs-otel-*"
+              "ss4o_logs-*"
             ],
             "template": {
               "mappings": {
@@ -46,6 +49,15 @@ otel-logs-pipeline:
                     "properties": {
                       "name": {
                         "type": "keyword"
+                      },
+                      "version": {
+                        "type": "text",
+                        "fields": {
+                          "keyword": {
+                            "type": "keyword",
+                            "ignore_above": 256
+                          }
+                        }
                       }
                     }
                   },
@@ -53,14 +65,107 @@ otel-logs-pipeline:
                     "properties": {
                       "attributes": {
                         "properties": {
+                          "0": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "@OrderResult": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "ContentRoot": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "EnvName": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "State": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "addr": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
                           "address": {
                             "type": "keyword"
                           },
                           "amount": {
                             "type": "keyword"
                           },
+                          "app@product@id": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "app@product@name": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
                           "cardType": {
                             "type": "keyword"
+                          },
+                          "code@file@path": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "code@function@name": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "code@line@number": {
+                            "type": "long"
                           },
                           "contentRoot": {
                             "type": "keyword"
@@ -68,17 +173,197 @@ otel-logs-pipeline:
                           "context": {
                             "type": "keyword"
                           },
+                          "converted_cost": {
+                            "type": "float"
+                          },
+                          "currency": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "destination@address": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "email": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
                           "envName": {
                             "type": "keyword"
                           },
+                          "err": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "error": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "event@name": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "exception@message": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "exception@stacktrace": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "exception@type": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "failure_probability": {
+                            "type": "float"
+                          },
+                          "failure_type": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "from": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
                           "hostname": {
                             "type": "keyword"
+                          },
+                          "http": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "https": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "items": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "items_count": {
+                            "type": "long"
                           },
                           "lastFourDigits": {
                             "type": "keyword"
                           },
                           "level": {
                             "type": "keyword"
+                          },
+                          "loyalty_level": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "message": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "name": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "order": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "order_id": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
                           },
                           "otelServiceName": {
                             "type": "keyword"
@@ -92,16 +377,61 @@ otel-logs-pipeline:
                           "otelTraceSampled": {
                             "type": "boolean"
                           },
+                          "paymentInfo": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
                           "pid": {
                             "type": "long"
                           },
                           "productId": {
                             "type": "keyword"
                           },
+                          "products": {
+                            "type": "long"
+                          },
                           "quantity": {
                             "type": "long"
                           },
+                          "quote@cents": {
+                            "type": "long"
+                          },
+                          "quote@dollars": {
+                            "type": "long"
+                          },
+                          "quote_service_addr": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
                           "request": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "server@address": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "service@name": {
                             "type": "text",
                             "fields": {
                               "keyword": {
@@ -116,6 +446,18 @@ otel-logs-pipeline:
                           "severity": {
                             "type": "keyword"
                           },
+                          "shipping_cost": {
+                            "type": "float"
+                          },
+                          "source@address": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
                           "span_id": {
                             "type": "keyword"
                           },
@@ -127,17 +469,146 @@ otel-logs-pipeline:
                             "type": "date",
                             "format": "yyyy-MM-dd'T'HH:mm:ss.SSSSSSSSS'Z'||yyyy-MM-dd'T'HH:mm:ss.SSS'Z'||strict_date_optional_time||epoch_millis"
                           },
+                          "to": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "total_amount": {
+                            "type": "float"
+                          },
                           "trace_flags": {
                             "type": "keyword"
                           },
                           "trace_id": {
                             "type": "keyword"
                           },
+                          "tracking_id": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
                           "transactionId": {
                             "type": "keyword"
                           },
+                          "transaction_id": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "upstream@cluster": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "upstream@host": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "url@full": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "url@path": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "url@query": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "url@template": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "urls": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "userID": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
                           "userId": {
                             "type": "keyword"
+                          },
+                          "user_agent@original": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "user_currency": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "user_id": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
                           }
                         }
                       }
@@ -146,10 +617,22 @@ otel-logs-pipeline:
                   "observedTime": {
                     "type": "date"
                   },
+                  "observedTimestamp": {
+                    "type": "date"
+                  },
                   "resource": {
                     "properties": {
                       "attributes": {
                         "properties": {
+                          "cluster_name": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
                           "container@id": {
                             "type": "keyword"
                           },
@@ -158,6 +641,33 @@ otel-logs-pipeline:
                           },
                           "host@name": {
                             "type": "keyword"
+                          },
+                          "log_name": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "node_name": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "os@build_id": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
                           },
                           "os@description": {
                             "type": "text",
@@ -234,6 +744,15 @@ otel-logs-pipeline:
                           "process@runtime@version": {
                             "type": "keyword"
                           },
+                          "service@instance@id": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
                           "service@name": {
                             "type": "keyword"
                           },
@@ -246,6 +765,24 @@ otel-logs-pipeline:
                           "telemetry@auto@version": {
                             "type": "keyword"
                           },
+                          "telemetry@distro@name": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
+                          "telemetry@distro@version": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
+                          },
                           "telemetry@sdk@language": {
                             "type": "keyword"
                           },
@@ -254,6 +791,15 @@ otel-logs-pipeline:
                           },
                           "telemetry@sdk@version": {
                             "type": "keyword"
+                          },
+                          "zone_name": {
+                            "type": "text",
+                            "fields": {
+                              "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                              }
+                            }
                           }
                         }
                       }

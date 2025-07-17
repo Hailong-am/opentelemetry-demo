@@ -65,17 +65,6 @@ var tracer trace.Tracer
 var resource *sdkresource.Resource
 var initResourcesOnce sync.Once
 
-func WithTraceFields(ctx context.Context) logrus.Fields {
-    span := trace.SpanFromContext(ctx)
-    sc := span.SpanContext()
-    if !sc.IsValid() {
-        return logrus.Fields{}
-    }
-    return logrus.Fields{
-        "trace_id": sc.TraceID().String(),
-        "span_id":  sc.SpanID().String(),
-    }
-}
 
 func init() {
 	logger = otelslog.NewLogger("checkout")
@@ -290,7 +279,7 @@ func (cs *checkout) PlaceOrder(ctx context.Context, req *pb.PlaceOrderRequest) (
 	)
 	logger.LogAttrs(
 		ctx,
-		slog.LevelInfo, "[PlaceOrder]",
+		slog.LevelInfo, "[PlaceOrder] user_id=" + req.UserId + " user_currency=" + req.UserCurrency,
 		slog.String("user_id", req.UserId),
 		slog.String("user_currency", req.UserCurrency),
 	)
@@ -324,25 +313,46 @@ func (cs *checkout) PlaceOrder(ctx context.Context, req *pb.PlaceOrderRequest) (
 
 	txID, err := cs.chargeCard(ctx, total, req.CreditCard)
 	if err != nil {
-		log.WithFields(WithTraceFields(ctx)).Errorf("failed to charge card: %+v", err)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelError, "[PlaceOrder] charge_failed order_id=" + orderID.String() + " error=" + err.Error(),
+			slog.String("order_id", orderID.String()),
+			slog.Any("error", err),
+		)
 		return nil, status.Errorf(codes.Internal, "failed to charge card: %+v", err)
 	}else {
-		log.WithFields(WithTraceFields(ctx)).Infof("charge card successfully, total: %+v", total)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelInfo, "[PlaceOrder] charge successful transaction_id=" + txID + " order_id=" + orderID.String(),
+			slog.String("transaction_id", txID),
+			slog.String("order_id", orderID.String()),
+		)
 	}
 	span.AddEvent("charged",
 		trace.WithAttributes(attribute.String("app.payment.transaction.id", txID)))
 	logger.LogAttrs(
 		ctx,
-		slog.LevelInfo, "payment went through",
+		slog.LevelInfo, "[PlaceOrder] payment completed transaction_id=" + txID + " order_id=" + orderID.String(),
 		slog.String("transaction_id", txID),
+		slog.String("order_id", orderID.String()),
 	)
 
 	shippingTrackingID, err := cs.shipOrder(ctx, req.Address, prep.cartItems)
 	if err != nil {
-		log.WithFields(WithTraceFields(ctx)).Errorf("shipping error: %+v", err)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelError, "[PlaceOrder] shipping_failed order_id=" + orderID.String() + " error=" + err.Error(),
+			slog.String("order_id", orderID.String()),
+			slog.Any("error", err),
+		)
 		return nil, status.Errorf(codes.Unavailable, "shipping error: %+v", err)
 	}else {
-		log.WithFields(WithTraceFields(ctx)).Infof("Shipping order successfully, Address: %+v", req.Address)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelInfo, "[PlaceOrder] shipping completed tracking_id=" + shippingTrackingID + " order_id=" + orderID.String(),
+			slog.String("tracking_id", shippingTrackingID),
+			slog.String("order_id", orderID.String()),
+		)
 	}
 	shippingTrackingAttribute := attribute.String("app.shipping.tracking.id", shippingTrackingID)
 	span.AddEvent("shipped", trace.WithAttributes(shippingTrackingAttribute))
@@ -369,23 +379,39 @@ func (cs *checkout) PlaceOrder(ctx context.Context, req *pb.PlaceOrderRequest) (
 	)
 	logger.LogAttrs(
 		ctx,
-		slog.LevelInfo, "order placed",
-		slog.String("app.order.id", orderID.String()),
-		slog.Float64("app.shipping.amount", shippingCostFloat),
-		slog.Float64("app.order.amount", totalPriceFloat),
-		slog.Int("app.order.items.count", len(prep.orderItems)),
-		slog.String("app.shipping.tracking.id", shippingTrackingID),
+		slog.LevelInfo, "[PlaceOrder] order_completed order_id=" + orderID.String() + " transaction_id=" + txID + " tracking_id=" + shippingTrackingID + " total_amount=" + fmt.Sprintf("%.2f", totalPriceFloat) + " shipping_cost=" + fmt.Sprintf("%.2f", shippingCostFloat) + " items_count=" + strconv.Itoa(len(prep.orderItems)),
+		slog.String("order_id", orderID.String()),
+		slog.String("transaction_id", txID),
+		slog.String("tracking_id", shippingTrackingID),
+		slog.Float64("total_amount", totalPriceFloat),
+		slog.Float64("shipping_cost", shippingCostFloat),
+		slog.Int("items_count", len(prep.orderItems)),
 	)
 
 	if err := cs.sendOrderConfirmation(ctx, req.Email, orderResult); err != nil {
-		logger.Warn(fmt.Sprintf("failed to send order confirmation to %q: %+v", req.Email, err))
+		logger.LogAttrs(
+			ctx,
+			slog.LevelWarn, "[PlaceOrder] email_failed order_id=" + orderID.String() + " email=" + req.Email + " error=" + err.Error(),
+			slog.String("order_id", orderID.String()),
+			slog.String("email", req.Email),
+			slog.Any("error", err),
+		)
 	} else {
-		logger.Info(fmt.Sprintf("order confirmation email sent to %q", req.Email))
+		logger.LogAttrs(
+			ctx,
+			slog.LevelInfo, "[PlaceOrder] email_sent order_id=" + orderID.String() + " email=" + req.Email,
+			slog.String("order_id", orderID.String()),
+			slog.String("email", req.Email),
+		)
 	}
 
 	// send to kafka only if kafka broker address is set
 	if cs.kafkaBrokerSvcAddr != "" {
-		logger.Info("sending to postProcessor")
+		logger.LogAttrs(
+			ctx,
+			slog.LevelInfo, "[PlaceOrder] kafka_send order_id=" + orderID.String(),
+			slog.String("order_id", orderID.String()),
+		)
 		cs.sendToPostProcessor(ctx, orderResult)
 	}
 
@@ -407,31 +433,78 @@ func (cs *checkout) prepareOrderItemsAndShippingQuoteFromCart(ctx context.Contex
 	var out orderPrep
 	cartItems, err := cs.getUserCart(ctx, userID)
 	if err != nil {
-		log.WithFields(WithTraceFields(ctx)).Errorf("cart failure: %+v", err)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelError, "[prepare] cart_failure user_id=" + userID + " error=" + err.Error(),
+			slog.String("user_id", userID),
+			slog.Any("error", err),
+		)
 		return out, fmt.Errorf("cart failure: %+v", err)
 	} else {
-		log.WithFields(WithTraceFields(ctx)).Infof("Get user cart successfully, cartItems: %+v",cartItems)
+		var totalItems int32
+		for _, item := range cartItems {
+			totalItems += item.Quantity
+		}
+		logger.LogAttrs(
+			ctx,
+			slog.LevelInfo, "[prepare] cart_loaded user_id=" + userID + " items_count=" + strconv.Itoa(int(totalItems)),
+			slog.String("user_id", userID),
+			slog.Int("items_count", int(totalItems)),
+		)
 	}
 	orderItems, err := cs.prepOrderItems(ctx, cartItems, userCurrency)
 	if err != nil {
-		log.WithFields(WithTraceFields(ctx)).Errorf("failed to prepare order: %+v", err)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelError, "[prepare] order_prep_failed user_id=" + userID + " error=" + err.Error(),
+			slog.String("user_id", userID),
+			slog.Any("error", err),
+		)
 		return out, fmt.Errorf("failed to prepare order: %+v", err)
 	} else {
-		log.WithFields(WithTraceFields(ctx)).Infof("prepare order successfully, userCurrency: %+v",userCurrency)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelInfo, "[prepare] order_prep_success user_id=" + userID + " items_count=" + strconv.Itoa(len(orderItems)) + " currency=" + userCurrency,
+			slog.String("user_id", userID),
+			slog.Int("items_count", len(orderItems)),
+			slog.String("currency", userCurrency),
+		)
 	}
 	shippingUSD, err := cs.quoteShipping(ctx, address, cartItems)
 	if err != nil {
-		log.WithFields(WithTraceFields(ctx)).Errorf("shipping quote failure: %+v", err)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelError, "[prepare] shipping_quote_failed user_id=" + userID + " error=" + err.Error(),
+			slog.String("user_id", userID),
+			slog.Any("error", err),
+		)
 		return out, fmt.Errorf("shipping quote failure: %+v", err)
 	} else {
-		log.WithFields(WithTraceFields(ctx)).Infof("get shipping quote successfully, address: %+v, cartItems: %+v",address, cartItems)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelInfo, "[prepare] shipping_quote_success user_id=" + userID + " shipping_cost=" + fmt.Sprintf("%.2f", float64(shippingUSD.GetUnits())+float64(shippingUSD.GetNanos())/1000000000),
+			slog.String("user_id", userID),
+			slog.Float64("shipping_cost", float64(shippingUSD.GetUnits())+float64(shippingUSD.GetNanos())/1000000000),
+		)
 	}
 	shippingPrice, err := cs.convertCurrency(ctx, shippingUSD, userCurrency)
 	if err != nil {
-		log.WithFields(WithTraceFields(ctx)).Errorf("failed to convert shipping cost to currency: %+v", err)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelError, "[prepare] currency_convert_failed user_id=" + userID + " currency=" + userCurrency + " error=" + err.Error(),
+			slog.String("user_id", userID),
+			slog.String("currency", userCurrency),
+			slog.Any("error", err),
+		)
 		return out, fmt.Errorf("failed to convert shipping cost to currency: %+v", err)
 	} else {
-		log.WithFields(WithTraceFields(ctx)).Infof("convert shipping cost to currency successfully, shippingUSD: %+v, userCurrency: %+v",shippingUSD, userCurrency)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelInfo, "[prepare] currency_convert_success user_id=" + userID + " currency=" + userCurrency + " converted_cost=" + fmt.Sprintf("%.2f", float64(shippingPrice.GetUnits())+float64(shippingPrice.GetNanos())/1000000000),
+			slog.String("user_id", userID),
+			slog.String("currency", userCurrency),
+			slog.Float64("converted_cost", float64(shippingPrice.GetUnits())+float64(shippingPrice.GetNanos())/1000000000),
+		)
 	}
 
 	out.shippingCostLocalized = shippingPrice
@@ -470,7 +543,11 @@ func (cs *checkout) quoteShipping(ctx context.Context, address *pb.Address, item
 		"items":   items,
 	})
 	if err != nil {
-		log.WithFields(WithTraceFields(ctx)).Errorf("could not connect shipping service: %+v", err)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelError, "could not connect shipping service",
+			slog.Any("error", err),
+		)
 		return nil, fmt.Errorf("failed to marshal ship order request: %+v", err)
 	}
 
@@ -486,7 +563,11 @@ func (cs *checkout) quoteShipping(ctx context.Context, address *pb.Address, item
 
 	shippingQuoteBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.WithFields(WithTraceFields(ctx)).Errorf("failed to get shipping quote: %+v", err)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelError, "failed to get shipping quote",
+			slog.Any("error", err),
+		)
 		return nil, fmt.Errorf("failed to read shipping quote response: %+v", err)
 	}
 
@@ -506,7 +587,11 @@ func (cs *checkout) quoteShipping(ctx context.Context, address *pb.Address, item
 func (cs *checkout) getUserCart(ctx context.Context, userID string) ([]*pb.CartItem, error) {
 	cart, err := cs.cartSvcClient.GetCart(ctx, &pb.GetCartRequest{UserId: userID})
 	if err != nil {
-		log.WithFields(WithTraceFields(ctx)).Errorf("failed to get user cart during checkout: %+v", err)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelError, "failed to get user cart during checkout",
+			slog.Any("error", err),
+		)
 		return nil, fmt.Errorf("failed to get user cart during checkout: %+v", err)
 	}
 	return cart.GetItems(), nil
@@ -514,26 +599,47 @@ func (cs *checkout) getUserCart(ctx context.Context, userID string) ([]*pb.CartI
 
 func (cs *checkout) emptyUserCart(ctx context.Context, userID string) error {
 	if _, err := cs.cartSvcClient.EmptyCart(ctx, &pb.EmptyCartRequest{UserId: userID}); err != nil {
-		log.WithFields(WithTraceFields(ctx)).Errorf("failed to empty user cart during checkout: %+v", err)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelError, "failed to empty user cart during checkout",
+			slog.Any("error", err),
+		)
 		return fmt.Errorf("failed to empty user cart during checkout: %+v", err)
 	}
-	log.WithFields(WithTraceFields(ctx)).Infof("empty user cart during checkout successfully, userID: %+v",userID)
+	logger.LogAttrs(
+		ctx,
+		slog.LevelInfo, "empty user cart during checkout successfully",
+		slog.String("userID", userID),
+	)
 	return nil
 }
 
 func (cs *checkout) prepOrderItems(ctx context.Context, items []*pb.CartItem, userCurrency string) ([]*pb.OrderItem, error) {
 	out := make([]*pb.OrderItem, len(items))
-	log.WithFields(WithTraceFields(ctx)).Infof("preparing order for items: %+v",items)
+	logger.LogAttrs(
+		ctx,
+		slog.LevelInfo, "preparing order for items",
+		slog.Any("items", items),
+	)
 
 	for i, item := range items {
 		product, err := cs.productCatalogSvcClient.GetProduct(ctx, &pb.GetProductRequest{Id: item.GetProductId()})
 		if err != nil {
-			log.WithFields(WithTraceFields(ctx)).Errorf("failed to get product #%q", item.GetProductId())
+			logger.LogAttrs(
+				ctx,
+				slog.LevelError, "failed to get product",
+				slog.String("product_id", item.GetProductId()),
+			)
 			return nil, fmt.Errorf("failed to get product #%q", item.GetProductId())
 		}
 		price, err := cs.convertCurrency(ctx, product.GetPriceUsd(), userCurrency)
 		if err != nil {
-			log.WithFields(WithTraceFields(ctx)).Errorf("failed to convert price of %q to %s", item.GetProductId(), userCurrency)
+			logger.LogAttrs(
+				ctx,
+				slog.LevelError, "failed to convert price",
+				slog.String("product_id", item.GetProductId()),
+				slog.String("currency", userCurrency),
+			)
 			return nil, fmt.Errorf("failed to convert price of %q to %s", item.GetProductId(), userCurrency)
 		}
 		out[i] = &pb.OrderItem{
@@ -547,9 +653,18 @@ func (cs *checkout) convertCurrency(ctx context.Context, from *pb.Money, toCurre
 	result, err := cs.currencySvcClient.Convert(ctx, &pb.CurrencyConversionRequest{
 		From:   from,
 		ToCode: toCurrency})
-	log.WithFields(WithTraceFields(ctx)).Infof("convert currency, from: %+v, to: %+v",from, toCurrency)
+	logger.LogAttrs(
+		ctx,
+		slog.LevelInfo, "convert currency",
+		slog.Any("from", from),
+		slog.String("to", toCurrency),
+	)
 	if err != nil {
-		log.WithFields(WithTraceFields(ctx)).Errorf("failed to convert currency: %+v", err)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelError, "failed to convert currency",
+			slog.Any("error", err),
+		)
 		return nil, fmt.Errorf("failed to convert currency: %+v", err)
 	}
 	return result, err
@@ -557,7 +672,12 @@ func (cs *checkout) convertCurrency(ctx context.Context, from *pb.Money, toCurre
 
 func (cs *checkout) chargeCard(ctx context.Context, amount *pb.Money, paymentInfo *pb.CreditCardInfo) (string, error) {
 	paymentService := cs.paymentSvcClient
-	log.WithFields(WithTraceFields(ctx)).Infof("charge card, amount: %+v, paymentInfo: %+v",amount, paymentInfo)
+	logger.LogAttrs(
+		ctx,
+		slog.LevelInfo, "charge card",
+		slog.Any("amount", amount),
+		slog.Any("paymentInfo", paymentInfo),
+	)
 	if cs.isFeatureFlagEnabled(ctx, "paymentUnreachable") {
 		badAddress := "badAddress:50051"
 		c := mustCreateClient(badAddress)
@@ -568,7 +688,11 @@ func (cs *checkout) chargeCard(ctx context.Context, amount *pb.Money, paymentInf
 		Amount:     amount,
 		CreditCard: paymentInfo})
 	if err != nil {
-		log.WithFields(WithTraceFields(ctx)).Errorf("could not charge the card: %+v", err)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelError, "could not charge the card",
+			slog.Any("error", err),
+		)
 		return "", fmt.Errorf("could not charge the card: %+v", err)
 	}
 	return paymentResp.GetTransactionId(), nil
@@ -583,16 +707,30 @@ func (cs *checkout) sendOrderConfirmation(ctx context.Context, email string, ord
 		return fmt.Errorf("failed to marshal order to JSON: %+v", err)
 	}
 
-	log.WithFields(WithTraceFields(ctx)).Infof("sending order confirmation email, email: %+v, order: %+v",email, order)
+	logger.LogAttrs(
+		ctx,
+		slog.LevelInfo, "sending order confirmation email",
+		slog.String("email", email),
+		slog.Any("order", order),
+	)
 	resp, err := otelhttp.Post(ctx, cs.emailSvcAddr+"/send_order_confirmation", "application/json", bytes.NewBuffer(emailPayload))
 	if err != nil {
-		log.WithFields(WithTraceFields(ctx)).Errorf("failed POST to email service: %+v", err)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelError, "failed POST to email service",
+			slog.Any("error", err),
+		)
 		return fmt.Errorf("failed POST to email service: %+v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.WithFields(WithTraceFields(ctx)).Errorf("failed POST to email service: expected 200, got %d", resp.StatusCode)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelError, "failed POST to email service",
+			slog.Int("expected", 200),
+			slog.Int("got", resp.StatusCode),
+		)
 		return fmt.Errorf("failed POST to email service: expected 200, got %d", resp.StatusCode)
 	}
 
@@ -609,15 +747,23 @@ func (cs *checkout) shipOrder(ctx context.Context, address *pb.Address, items []
 	}
 
 	resp, err := otelhttp.Post(ctx, cs.shippingSvcAddr+"/ship-order", "application/json", bytes.NewBuffer(shipPayload))
-	log.WithFields(WithTraceFields(ctx)).Infof("shipping order, address: %+v, items: %+v",address, items)
+	logger.LogAttrs(
+		ctx,
+		slog.LevelInfo, "shipping order",
+		slog.Any("address", address),
+		slog.Any("items", items),
+	)
 	if err != nil {
-		log.WithFields(WithTraceFields(ctx)).Errorf("shipment failed: %+v", err)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelError, "shipment failed",
+			slog.Any("error", err),
+		)
 		return "", fmt.Errorf("failed POST to shipping service: %+v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-
 		return "", fmt.Errorf("failed POST to email service: expected 200, got %d", resp.StatusCode)
 	}
 
@@ -630,7 +776,11 @@ func (cs *checkout) shipOrder(ctx context.Context, address *pb.Address, items []
 		TrackingID string `json:"tracking_id"`
 	}
 	if err := json.Unmarshal(trackingRespBytes, &shipResp); err != nil {
-		log.WithFields(WithTraceFields(ctx)).Errorf("shipment failed: %+v", err)
+		logger.LogAttrs(
+			ctx,
+			slog.LevelError, "shipment failed",
+			slog.Any("error", err),
+		)
 		return "", fmt.Errorf("failed to unmarshal ship order response: %+v", err)
 	}
 	if shipResp.TrackingID == "" {
