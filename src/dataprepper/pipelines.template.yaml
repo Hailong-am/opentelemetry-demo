@@ -10,12 +10,13 @@ otel-logs-pipeline:
   processor:
     - add_entries:
         entries:
+          # - key: "log.attributes.serviceName"
+          #   value_expression: "/serviceName"
+          #   add_when: "/serviceName != null"
           - key: "serviceName"
-            value_expression: "/log/attributes/service.name"
-            add_when: "/log/attributes/service.name != null"
-          - key: "log.attributes.serviceName"
-            value_expression: "/serviceName"
-            add_when: "/serviceName != null"
+            value_expression: "/log/attributes/serviceName"
+            add_when: "/log/attributes/serviceName != null"
+
   buffer:
     bounded_blocking:
   sink:
