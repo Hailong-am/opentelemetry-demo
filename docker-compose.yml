@@ -18,6 +18,7 @@ networks:
 
 volumes:
   opensearch-data1:
+    name: opensearch-data1
   prometheus_data:
 services:
   # ******************
@@ -771,7 +772,7 @@ services:
       - "--prometheus.server-url=http://${PROMETHEUS_ADDR}"
       - "--prometheus.query.normalize-calls=true"
       - "--prometheus.query.normalize-duration=true"
-      - "--es.server-urls=http://${OPENSEARCH_HOST}:${OPENSEARCH_PORT}"
+      - "--es.server-urls=https://${OPENSEARCH_HOST}:${OPENSEARCH_PORT}"
       - "--es.tls.enabled=true"
     deploy:
       resources:
