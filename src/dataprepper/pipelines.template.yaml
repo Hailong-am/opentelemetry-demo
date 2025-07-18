@@ -14,8 +14,8 @@ otel-logs-pipeline:
           #   value_expression: "/serviceName"
           #   add_when: "/serviceName != null"
           - key: "serviceName"
-            value_expression: "/log/attributes/serviceName"
-            add_when: "/log/attributes/serviceName != null"
+            value_expression: "/log.attributes.serviceName"
+            add_when: "/log.attributes.serviceName != null"
 
   buffer:
     bounded_blocking:
