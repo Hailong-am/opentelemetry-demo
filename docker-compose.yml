@@ -881,6 +881,11 @@ services:
   opensearch:
     image: ${OPENSEARCH_IMAGE}
     container_name: opensearch
+    build:
+      context: ./
+      dockerfile: ${OPENSEARCH_DOCKERFILE}
+      cache_from:
+        - ${OPENSEARCH_IMAGE}
     restart: unless-stopped
     environment:
       - cluster.name=demo-cluster
