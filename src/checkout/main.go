@@ -232,11 +232,11 @@ func main() {
 	if svc.kafkaBrokerSvcAddr != "" {
 		svc.KafkaProducerClient, err = kafka.CreateKafkaProducer([]string{svc.kafkaBrokerSvcAddr}, logger)
 		if err != nil {
-			logger.Error(err.Error())
+			logger.Error("Failed to initialize Kafka producer", "error", err.Error(), "broker", svc.kafkaBrokerSvcAddr)
 		}
 	}
 
-	logger.Info(fmt.Sprintf("service config: %+v", svc))
+	logger.Info("Checkout service starting", "port", port, "kafka_enabled", svc.kafkaBrokerSvcAddr != "")
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
 	if err != nil {
@@ -250,9 +250,9 @@ func main() {
 
 	healthcheck := health.NewServer()
 	healthpb.RegisterHealthServer(srv, healthcheck)
-	logger.Info(fmt.Sprintf("starting to listen on tcp: %q", lis.Addr().String()))
+	logger.Info("gRPC server starting", "address", lis.Addr().String())
 	err = srv.Serve(lis)
-	logger.Error(err.Error())
+	logger.Error("Failed to start gRPC server", "error", err.Error())
 }
 
 func mustMapEnv(target *string, envKey string) {
@@ -531,7 +531,7 @@ func mustCreateClient(svcAddr string) *grpc.ClientConn {
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 	)
 	if err != nil {
-		logger.Error(fmt.Sprintf("could not connect to %s service, err: %+v", svcAddr, err))
+		logger.Error("Failed to connect to downstream service", "service", svcAddr, "error", err.Error())
 	}
 
 	return c
@@ -616,11 +616,7 @@ func (cs *checkout) emptyUserCart(ctx context.Context, userID string) error {
 
 func (cs *checkout) prepOrderItems(ctx context.Context, items []*pb.CartItem, userCurrency string) ([]*pb.OrderItem, error) {
 	out := make([]*pb.OrderItem, len(items))
-	logger.LogAttrs(
-		ctx,
-		slog.LevelInfo, "preparing order for items",
-		slog.Any("items", items),
-	)
+	logger.Info("Preparing order items", "item_count", len(items))
 
 	for i, item := range items {
 		product, err := cs.productCatalogSvcClient.GetProduct(ctx, &pb.GetProductRequest{Id: item.GetProductId()})
@@ -653,12 +649,7 @@ func (cs *checkout) convertCurrency(ctx context.Context, from *pb.Money, toCurre
 	result, err := cs.currencySvcClient.Convert(ctx, &pb.CurrencyConversionRequest{
 		From:   from,
 		ToCode: toCurrency})
-	logger.LogAttrs(
-		ctx,
-		slog.LevelInfo, "convert currency",
-		slog.Any("from", from),
-		slog.String("to", toCurrency),
-	)
+	logger.Info("Converting currency", "from", from.GetCurrencyCode(), "to", toCurrency, "amount", fmt.Sprintf("%d.%02d", from.GetUnits(), from.GetNanos()/10000000))
 	if err != nil {
 		logger.LogAttrs(
 			ctx,
@@ -672,12 +663,7 @@ func (cs *checkout) convertCurrency(ctx context.Context, from *pb.Money, toCurre
 
 func (cs *checkout) chargeCard(ctx context.Context, amount *pb.Money, paymentInfo *pb.CreditCardInfo) (string, error) {
 	paymentService := cs.paymentSvcClient
-	logger.LogAttrs(
-		ctx,
-		slog.LevelInfo, "charge card",
-		slog.Any("amount", amount),
-		slog.Any("paymentInfo", paymentInfo),
-	)
+	logger.Info("Processing payment", "currency", amount.GetCurrencyCode(), "amount", fmt.Sprintf("%d.%02d", amount.GetUnits(), amount.GetNanos()/10000000))
 	if cs.isFeatureFlagEnabled(ctx, "paymentUnreachable") {
 		badAddress := "badAddress:50051"
 		c := mustCreateClient(badAddress)
@@ -707,12 +693,7 @@ func (cs *checkout) sendOrderConfirmation(ctx context.Context, email string, ord
 		return fmt.Errorf("failed to marshal order to JSON: %+v", err)
 	}
 
-	logger.LogAttrs(
-		ctx,
-		slog.LevelInfo, "sending order confirmation email",
-		slog.String("email", email),
-		slog.Any("order", order),
-	)
+	logger.Info("Sending order confirmation", "email", email, "order_id", order.GetOrderId())
 	resp, err := otelhttp.Post(ctx, cs.emailSvcAddr+"/send_order_confirmation", "application/json", bytes.NewBuffer(emailPayload))
 	if err != nil {
 		logger.LogAttrs(
@@ -747,12 +728,7 @@ func (cs *checkout) shipOrder(ctx context.Context, address *pb.Address, items []
 	}
 
 	resp, err := otelhttp.Post(ctx, cs.shippingSvcAddr+"/ship-order", "application/json", bytes.NewBuffer(shipPayload))
-	logger.LogAttrs(
-		ctx,
-		slog.LevelInfo, "shipping order",
-		slog.Any("address", address),
-		slog.Any("items", items),
-	)
+	logger.Info("Shipping order", "item_count", len(items), "address_country", address.GetCountry())
 	if err != nil {
 		logger.LogAttrs(
 			ctx,
@@ -793,7 +769,7 @@ func (cs *checkout) shipOrder(ctx context.Context, address *pb.Address, items []
 func (cs *checkout) sendToPostProcessor(ctx context.Context, result *pb.OrderResult) {
 	message, err := proto.Marshal(result)
 	if err != nil {
-		logger.Error(fmt.Sprintf("Failed to marshal message to protobuf: %+v", err))
+		logger.Error("Failed to marshal order data for Kafka", "error", err.Error(), "order_id", result.GetOrderId())
 		return
 	}
 
@@ -810,7 +786,7 @@ func (cs *checkout) sendToPostProcessor(ctx context.Context, result *pb.OrderRes
 	startTime := time.Now()
 	select {
 	case cs.KafkaProducerClient.Input() <- &msg:
-		logger.Info(fmt.Sprintf("Message sent to Kafka: %v", msg))
+		logger.Info("Message queued to Kafka", "topic", msg.Topic)
 		select {
 		case successMsg := <-cs.KafkaProducerClient.Successes():
 			span.SetAttributes(
@@ -818,21 +794,21 @@ func (cs *checkout) sendToPostProcessor(ctx context.Context, result *pb.OrderRes
 				attribute.Int("messaging.kafka.producer.duration_ms", int(time.Since(startTime).Milliseconds())),
 				attribute.KeyValue(semconv.MessagingKafkaMessageOffset(int(successMsg.Offset))),
 			)
-			logger.Info(fmt.Sprintf("Successful to write message. offset: %v, duration: %v", successMsg.Offset, time.Since(startTime)))
+			logger.Info("Message sent to Kafka successfully", "offset", successMsg.Offset, "duration_ms", time.Since(startTime).Milliseconds(), "topic", successMsg.Topic)
 		case errMsg := <-cs.KafkaProducerClient.Errors():
 			span.SetAttributes(
 				attribute.Bool("messaging.kafka.producer.success", false),
 				attribute.Int("messaging.kafka.producer.duration_ms", int(time.Since(startTime).Milliseconds())),
 			)
 			span.SetStatus(otelcodes.Error, errMsg.Err.Error())
-			logger.Error(fmt.Sprintf("Failed to write message: %v", errMsg.Err))
+			logger.Error("Failed to send message to Kafka", "error", errMsg.Err.Error(), "topic", kafka.Topic)
 		case <-ctx.Done():
 			span.SetAttributes(
 				attribute.Bool("messaging.kafka.producer.success", false),
 				attribute.Int("messaging.kafka.producer.duration_ms", int(time.Since(startTime).Milliseconds())),
 			)
 			span.SetStatus(otelcodes.Error, "Context cancelled: "+ctx.Err().Error())
-			logger.Warn(fmt.Sprintf("Context canceled before success message received: %v", ctx.Err()))
+			logger.Warn("Kafka send interrupted by context cancellation", "error", ctx.Err().Error())
 		}
 	case <-ctx.Done():
 		span.SetAttributes(
@@ -840,7 +816,7 @@ func (cs *checkout) sendToPostProcessor(ctx context.Context, result *pb.OrderRes
 			attribute.Int("messaging.kafka.producer.duration_ms", int(time.Since(startTime).Milliseconds())),
 		)
 		span.SetStatus(otelcodes.Error, "Failed to send: "+ctx.Err().Error())
-		logger.Error(fmt.Sprintf("Failed to send message to Kafka within context deadline: %v", ctx.Err()))
+		logger.Error("Kafka send timeout", "error", ctx.Err().Error(), "topic", kafka.Topic)
 		return
 	}
 
@@ -853,7 +829,7 @@ func (cs *checkout) sendToPostProcessor(ctx context.Context, result *pb.OrderRes
 				_ = <-cs.KafkaProducerClient.Successes()
 			}(i)
 		}
-		logger.Info(fmt.Sprintf("Done with #%d messages for overload simulation.", ffValue))
+		logger.Info("Kafka overload simulation completed", "messages_sent", ffValue, "topic", kafka.Topic)
 	}
 }
 
