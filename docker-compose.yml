@@ -19,6 +19,7 @@ networks:
 volumes:
   opensearch-data1:
     name: opensearch-data1
+    external: true
   prometheus_data:
 services:
   # ******************
@@ -894,7 +895,7 @@ services:
       - bootstrap.memory_lock=true
       - discovery.type=single-node
       - OPENSEARCH_JAVA_OPTS=
-        -Xms2g -Xmx2g
+        -Xms8g -Xmx8g
         -Dcom.sun.management.jmxremote
         -Dcom.sun.management.jmxremote.authenticate=false
         -Dcom.sun.management.jmxremote.ssl=false
@@ -914,7 +915,7 @@ services:
         soft: 65536
         hard: 65536
     volumes:
-      - opensearch-data1:/usr/share/opensearch/data/${OPENSEARCH_VERSION}
+      - opensearch-data1:/usr/share/opensearch/data
     ports:
       - ${OPENSEARCH_PORT}:${OPENSEARCH_PORT}
       - "9600"
