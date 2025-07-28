@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use actix_web::{post, web, HttpResponse, Responder};
-use tracing::{info, error};
+use tracing::{info, error, instrument};
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::Context;
 use serde_json::json;
-use chrono::Utc;
 
 mod quote;
 use quote::create_quote_from_count;
@@ -19,49 +18,65 @@ pub use shipping_types::*;
 
 const NANOS_MULTIPLE: u32 = 10000000u32;
 
-#[post("/get-quote")]
-pub async fn get_quote(req: web::Json<GetQuoteRequest>) -> impl Responder {
-    let itemct: u32 = req.items.iter().map(|item| item.quantity as u32).sum();
-    
-    // Get current OpenTelemetry context and extract trace information
+// Helper function to extract trace context for consistent logging
+fn get_trace_context() -> (String, String) {
     let current_context = Context::current();
     let current_span = current_context.span();
     let span_context = current_span.span_context();
     let trace_id = span_context.trace_id().to_string();
     let span_id = span_context.span_id().to_string();
-    
-    let timestamp = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    
-    // Log the incoming request
-    let log_entry = json!({
-        "time": timestamp,
-        "trace_id": trace_id,
-        "span_id": span_id,
-        "message": format!("{:?}", *req),
-    });
-    info!("{}", log_entry.to_string());
+    (trace_id, span_id)
+}
 
-    let quote = match create_quote_from_count(itemct).await {
-        Ok(q) => q,
+#[post("/get-quote")]
+#[instrument(name = "shipping.get_quote", skip(req))]
+pub async fn get_quote(req: web::Json<GetQuoteRequest>) -> impl Responder {
+    let item_count: u32 = req.items.iter().map(|item| item.quantity as u32).sum();
+    let (trace_id, span_id) = get_trace_context();
+
+    // Log incoming request with business context
+    info!(
+        service = "shipping",
+        operation = "get_quote",
+        item_count = item_count,
+        has_address = req.address.is_some(),
+        zip_code = req.address.as_ref().map(|a| a.zip_code.as_str()).unwrap_or("none"),
+        trace_id = trace_id.as_str(),
+        span_id = span_id.as_str(),
+        "Processing shipping quote request"
+    );
+
+    let quote = match create_quote_from_count(item_count).await {
+        Ok(q) => {
+            info!(
+                service = "shipping",
+                operation = "get_quote",
+                quote_dollars = q.dollars,
+                quote_cents = q.cents,
+                item_count = item_count,
+                trace_id = trace_id.as_str(),
+                span_id = span_id.as_str(),
+                "Successfully calculated shipping quote"
+            );
+            q
+        }
         Err(e) => {
-            let log_entry_failed = json!({
-                "time": Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-                "trace_id": trace_id,
-                "span_id": span_id,
-                "message": format!("GetQuoteRequest failed, error: {:?}", e),
-            });
-            error!("{}", log_entry_failed.to_string());
-            return HttpResponse::InternalServerError().body(format!("Failed to get quote: {}", e));
+            error!(
+                service = "shipping",
+                operation = "get_quote",
+                error = %e,
+                item_count = item_count,
+                trace_id = trace_id.as_str(),
+                span_id = span_id.as_str(),
+                "Failed to calculate shipping quote"
+            );
+            return HttpResponse::InternalServerError()
+                .json(json!({
+                    "error": "Failed to calculate shipping quote",
+                    "trace_id": trace_id
+                }));
         }
     };
-
-    let log_entry_success = json!({
-        "time": Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        "trace_id": trace_id,
-        "span_id": span_id,
-        "message": "GetQuoteRequest successfully",
-    });
-    info!("{}", log_entry_success.to_string());
 
     let reply = GetQuoteResponse {
         cost_usd: Some(Money {
@@ -71,63 +86,45 @@ pub async fn get_quote(req: web::Json<GetQuoteRequest>) -> impl Responder {
         }),
     };
 
-    let timestamp2 = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    let log_entry2 = json!({
-        "time": timestamp2,
-        "trace_id": trace_id,
-        "span_id": span_id,
-        "message": format!("Sending Quote::{}", quote),
-    });
-    info!("{}", log_entry2.to_string());
-
     info!(
-        name = "SendingQuoteValue",
-        quote.dollars = quote.dollars,
-        quote.cents = quote.cents,
-        message = "Sending Quote"
+        service = "shipping",
+        operation = "get_quote",
+        response_dollars = quote.dollars,
+        response_cents = quote.cents,
+        currency = "USD",
+        trace_id = trace_id.as_str(),
+        span_id = span_id.as_str(),
+        "Shipping quote response sent successfully"
     );
 
     HttpResponse::Ok().json(reply)
 }
 
 #[post("/ship-order")]
+#[instrument(name = "shipping.ship_order", skip(req))]
 pub async fn ship_order(req: web::Json<ShipOrderRequest>) -> impl Responder {
-    // Get current OpenTelemetry context and extract trace information
-    let current_context = Context::current();
-    let current_span = current_context.span();
-    let span_context = current_span.span_context();
-    let trace_id = span_context.trace_id().to_string();
-    let span_id = span_context.span_id().to_string();
-    
-    let timestamp = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    
-    // Log the incoming request
-    let log_entry = json!({
-        "time": timestamp,
-        "trace_id": trace_id,
-        "span_id": span_id,
-        "message": format!("ShipOrderRequest: {:?}", *req),
-    });
-    info!("{}", log_entry.to_string());
+    let (trace_id, span_id) = get_trace_context();
 
-    let tid = create_tracking_id();
-    
-    let timestamp2 = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    let log_entry2 = json!({
-        "time": timestamp2,
-        "trace_id": trace_id,
-        "span_id": span_id,
-        "message": format!("Tracking ID Created: {}", tid),
-    });
-    info!("{}", log_entry2.to_string());
-    
     info!(
-        name = "CreatingTrackingId",
-        tracking_id = tid.as_str(),
-        message = "Tracking ID Created"
+        service = "shipping",
+        operation = "ship_order",
+        trace_id = trace_id.as_str(),
+        span_id = span_id.as_str(),
+        "Processing ship order request"
     );
-    
-    HttpResponse::Ok().json(ShipOrderResponse { tracking_id: tid })
+
+    let tracking_id = create_tracking_id();
+
+    info!(
+        service = "shipping",
+        operation = "ship_order",
+        tracking_id = tracking_id.as_str(),
+        trace_id = trace_id.as_str(),
+        span_id = span_id.as_str(),
+        "Order shipped successfully with tracking ID"
+    );
+
+    HttpResponse::Ok().json(ShipOrderResponse { tracking_id })
 }
 
 #[cfg(test)]
