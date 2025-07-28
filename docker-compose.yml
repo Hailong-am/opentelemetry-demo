@@ -917,6 +917,7 @@ services:
     ports:
       - ${OPENSEARCH_PORT}:${OPENSEARCH_PORT}
       - "9600"
+      - "9999:9999" # JMX port
     healthcheck:
       test: curl -s https://localhost:${OPENSEARCH_PORT}/_cluster/health -u '${OPENSEARCH_USER}':'${OPENSEARCH_PASSWORD}' -k | grep -E '"status":"(green|yellow)"'
       start_period: 30s # takes a bit longer to boot with security
