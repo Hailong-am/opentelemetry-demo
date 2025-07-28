@@ -893,7 +893,14 @@ services:
       - node.name=demo-node
       - bootstrap.memory_lock=true
       - discovery.type=single-node
-      - OPENSEARCH_JAVA_OPTS=-Xms2g -Xmx2g
+      - OPENSEARCH_JAVA_OPTS=
+        -Xms2g -Xmx2g
+        -Dcom.sun.management.jmxremote
+        -Dcom.sun.management.jmxremote.authenticate=false
+        -Dcom.sun.management.jmxremote.ssl=false
+        -Dcom.sun.management.jmxremote.port=9999
+        -Dcom.sun.management.jmxremote.rmi.port=9999
+        -Djava.rmi.server.hostname=localhost
       # Workaround on OSX for https://bugs.openjdk.org/browse/JDK-8345296
       - _JAVA_OPTIONS
       - plugins.query.datasources.encryption.masterkey=8e3f206ea7c07cc1bfc5cf40
