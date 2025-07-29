@@ -904,6 +904,7 @@ services:
       # Workaround on OSX for https://bugs.openjdk.org/browse/JDK-8345296
       - _JAVA_OPTIONS
       - plugins.query.datasources.encryption.masterkey=8e3f206ea7c07cc1bfc5cf40
+      - plugins.security.system_indices.enabled=false
       - "OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_PASSWORD}"
     ulimits:
       memlock:
