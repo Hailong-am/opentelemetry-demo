@@ -8,6 +8,8 @@ otel-logs-pipeline:
     otel_logs_source:
       ssl: false
   processor:
+    - drop_events:
+        drop_when: "/serviceName == \"frontend-proxy\" or /log/attributes/serviceName == \"frontend-proxy\" or /log/attributes/service@name == \"frontend-proxy\""
     - add_entries:
         entries:
           - key: "log.attributes.serviceName"

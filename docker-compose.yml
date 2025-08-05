@@ -837,7 +837,7 @@ services:
       - ${OTEL_COLLECTOR_CONFIG_EXTRAS}:/etc/otelcol-config-extras.yml
     ports:
       - "${OTEL_COLLECTOR_PORT_GRPC}"
-      - "${OTEL_COLLECTOR_PORT_HTTP}"
+      - "${OTEL_COLLECTOR_PORT_HTTP}:${OTEL_COLLECTOR_PORT_HTTP}"
     depends_on:
       jaeger:
         condition: service_started
