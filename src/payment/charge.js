@@ -27,6 +27,7 @@ module.exports.charge = async request => {
   await OpenFeature.setProviderAndWait(flagProvider);
 
   const numberVariant =  await OpenFeature.getClient().getNumberValue("paymentFailure", 0);
+  const currencyVariant =  await OpenFeature.getClient().getStringValue("paymentRejectCurrency", "CNY");
 
   if (numberVariant > 0) {
     // n% chance to fail with app.loyalty.level=gold
@@ -35,6 +36,19 @@ module.exports.charge = async request => {
       span.end();
 
       throw new Error('Payment request failed. Invalid token. app.loyalty.level=gold');
+    }
+  }
+
+  if (currencyVariant === request.amount.currencyCode) {
+    // always fail with app.payment.currency=CNY when the requested currency is also CNY
+    span.setAttributes({'app.payment.currency': currencyVariant });
+    span.end();
+
+    // simulate CNY as invalid currency
+    if (request.amount.currencyCode === 'CNY') {
+      throw new Error('Payment request failed. Invalid currency. app.payment.currency=CNY');
+    } else {
+      return new PaymentError(PaymentErrorCode.GATEWAY_TIMEOUT, `Payment request failed due to a timeout`);
     }
   }
 
