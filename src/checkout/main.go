@@ -292,12 +292,6 @@ func (cs *checkout) PlaceOrder(ctx context.Context, req *pb.PlaceOrderRequest) (
 		attribute.String("app.user.id", req.UserId),
 		attribute.String("app.user.currency", req.UserCurrency),
 	)
-	logger.LogAttrs(
-		ctx,
-		slog.LevelInfo, "[PlaceOrder]",
-		slog.String("user_id", req.UserId),
-		slog.String("user_currency", req.UserCurrency),
-	)
 
 	var err error
 	defer func() {
@@ -310,6 +304,13 @@ func (cs *checkout) PlaceOrder(ctx context.Context, req *pb.PlaceOrderRequest) (
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to generate order uuid")
 	}
+
+	logger.LogAttrs(
+		ctx,
+		slog.LevelInfo, fmt.Sprintf("order placement initiated - processing user request, order_id: %s", orderID.String()),
+		slog.String("user_id", req.UserId),
+		slog.String("user_currency", req.UserCurrency),
+	)
 
 	prep, err := cs.prepareOrderItemsAndShippingQuoteFromCart(ctx, req.UserId, req.UserCurrency, req.Address)
 	if err != nil {
@@ -335,14 +336,15 @@ func (cs *checkout) PlaceOrder(ctx context.Context, req *pb.PlaceOrderRequest) (
 		trace.WithAttributes(attribute.String("app.payment.transaction.id", txID)))
 	logger.LogAttrs(
 		ctx,
-		slog.LevelInfo, "payment went through",
-		slog.String("transaction_id", txID),
+		slog.LevelInfo, fmt.Sprintf("payment processing completed successfully - card charged, order_id: %s", orderID.String()),
+		slog.String("payment_transaction_id", txID),
 	)
 
 	shippingTrackingID, err := cs.shipOrder(ctx, req.Address, prep.cartItems)
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "shipping error: %+v", err)
 	}
+	logger.InfoContext(ctx, fmt.Sprintf("order shipping created successfully - tracking_id: %s", shippingTrackingID))
 	shippingTrackingAttribute := attribute.String("app.shipping.tracking.id", shippingTrackingID)
 	span.AddEvent("shipped", trace.WithAttributes(shippingTrackingAttribute))
 
@@ -368,7 +370,7 @@ func (cs *checkout) PlaceOrder(ctx context.Context, req *pb.PlaceOrderRequest) (
 	)
 	logger.LogAttrs(
 		ctx,
-		slog.LevelInfo, "order placed",
+		slog.LevelInfo, "order successfully placed and processed - ready for fulfillment",
 		slog.String("app.order.id", orderID.String()),
 		slog.Float64("app.shipping.amount", shippingCostFloat),
 		slog.Float64("app.order.amount", totalPriceFloat),
@@ -377,14 +379,14 @@ func (cs *checkout) PlaceOrder(ctx context.Context, req *pb.PlaceOrderRequest) (
 	)
 
 	if err := cs.sendOrderConfirmation(ctx, req.Email, orderResult); err != nil {
-		logger.Warn(fmt.Sprintf("failed to send order confirmation to %q: %+v", req.Email, err))
+		logger.WarnContext(ctx, fmt.Sprintf("order confirmation email delivery failed - order_id: %s, email: %q, error: %+v", orderResult.OrderId, req.Email, err))
 	} else {
-		logger.Info(fmt.Sprintf("order confirmation email sent to %q", req.Email))
+		logger.InfoContext(ctx, fmt.Sprintf("order confirmation email delivered successfully - order_id: %s, email: %q", orderResult.OrderId, req.Email))
 	}
 
 	// send to kafka only if kafka broker address is set
 	if cs.kafkaBrokerSvcAddr != "" {
-		logger.Info("sending to postProcessor")
+		logger.InfoContext(ctx, fmt.Sprintf("initiating post-order processing - order_id: %s, kafka_broker: %s", orderResult.OrderId, cs.kafkaBrokerSvcAddr))
 		cs.sendToPostProcessor(ctx, orderResult)
 	}
 
@@ -611,7 +613,7 @@ func (cs *checkout) shipOrder(ctx context.Context, address *pb.Address, items []
 func (cs *checkout) sendToPostProcessor(ctx context.Context, result *pb.OrderResult) {
 	message, err := proto.Marshal(result)
 	if err != nil {
-		logger.Error(fmt.Sprintf("Failed to marshal message to protobuf: %+v", err))
+		logger.ErrorContext(ctx, fmt.Sprintf("protobuf marshaling failed - order_id: %s, error: %+v", result.OrderId, err))
 		return
 	}
 
@@ -635,21 +637,21 @@ func (cs *checkout) sendToPostProcessor(ctx context.Context, result *pb.OrderRes
 				attribute.Int("messaging.kafka.producer.duration_ms", int(time.Since(startTime).Milliseconds())),
 				attribute.KeyValue(semconv.MessagingKafkaMessageOffset(int(successMsg.Offset))),
 			)
-			logger.Info(fmt.Sprintf("Successful to write message. offset: %v, duration: %v", successMsg.Offset, time.Since(startTime)))
+			logger.InfoContext(ctx, fmt.Sprintf("kafka message published successfully - order_id: %s, topic: %s, partition: %d, offset: %d, duration: %v", result.OrderId, kafka.Topic, successMsg.Partition, successMsg.Offset, time.Since(startTime)))
 		case errMsg := <-cs.KafkaProducerClient.Errors():
 			span.SetAttributes(
 				attribute.Bool("messaging.kafka.producer.success", false),
 				attribute.Int("messaging.kafka.producer.duration_ms", int(time.Since(startTime).Milliseconds())),
 			)
 			span.SetStatus(otelcodes.Error, errMsg.Err.Error())
-			logger.Error(fmt.Sprintf("Failed to write message: %v", errMsg.Err))
+			logger.ErrorContext(ctx, fmt.Sprintf("kafka message publishing failed - order_id: %s, topic: %s, error: %v", result.OrderId, kafka.Topic, errMsg.Err))
 		case <-ctx.Done():
 			span.SetAttributes(
 				attribute.Bool("messaging.kafka.producer.success", false),
 				attribute.Int("messaging.kafka.producer.duration_ms", int(time.Since(startTime).Milliseconds())),
 			)
 			span.SetStatus(otelcodes.Error, "Context cancelled: "+ctx.Err().Error())
-			logger.Warn(fmt.Sprintf("Context canceled before success message received: %v", ctx.Err()))
+			logger.WarnContext(ctx, fmt.Sprintf("kafka operation cancelled - order_id: %s, reason: context timeout, error: %v", result.OrderId, ctx.Err()))
 		}
 	case <-ctx.Done():
 		span.SetAttributes(
@@ -657,20 +659,20 @@ func (cs *checkout) sendToPostProcessor(ctx context.Context, result *pb.OrderRes
 			attribute.Int("messaging.kafka.producer.duration_ms", int(time.Since(startTime).Milliseconds())),
 		)
 		span.SetStatus(otelcodes.Error, "Failed to send: "+ctx.Err().Error())
-		logger.Error(fmt.Sprintf("Failed to send message to Kafka within context deadline: %v", ctx.Err()))
+		logger.ErrorContext(ctx, fmt.Sprintf("kafka producer input blocked - order_id: %s, timeout_duration: %v, error: %v", result.OrderId, time.Since(startTime), ctx.Err()))
 		return
 	}
 
 	ffValue := cs.getIntFeatureFlag(ctx, "kafkaQueueProblems")
 	if ffValue > 0 {
-		logger.Info("Warning: FeatureFlag 'kafkaQueueProblems' is activated, overloading queue now.")
+		logger.InfoContext(ctx, fmt.Sprintf("feature flag activated: kafka queue overload simulation - order_id: %s, additional_messages: %d", result.OrderId, ffValue))
 		for i := 0; i < ffValue; i++ {
 			go func(i int) {
 				cs.KafkaProducerClient.Input() <- &msg
 				_ = <-cs.KafkaProducerClient.Successes()
 			}(i)
 		}
-		logger.Info(fmt.Sprintf("Done with #%d messages for overload simulation.", ffValue))
+		logger.InfoContext(ctx, fmt.Sprintf("kafka overload simulation completed - order_id: %s, messages_sent: %d", result.OrderId, ffValue))
 	}
 }
 
